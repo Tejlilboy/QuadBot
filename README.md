@@ -1,5 +1,5 @@
 # QuadBot 🕷️
-![QuadBot](images/quadbot.png)
+![QuadBot](Images/quadbot.png)
 
 
 ### ESP32-Based Wireless Quadruped Robot
@@ -39,13 +39,15 @@ The project combines embedded systems programming, electronics design, PCB devel
 | Power Distribution | Custom-designed PCB |
 
 ## Custom Power Distribution PCB
-![Schematic Capture](images/quadbot-schematic.png)
 
-![PCB layout](images/quadbot-pcb.png)
 
-![Unsoldered PCB](images/PCB-unsoldered.png)
+![Schematic Capture](Images/quadbot-schematic.png)
 
-![Soldered PCB](images/PCB-soldered.png)
+![PCB layout](Images/quadbot-pcb.png)
+
+![Unsoldered PCB](Images/PCB-unsoldered.png)
+
+![Soldered PCB](Images/PCB-soldered.png)
 
 
 

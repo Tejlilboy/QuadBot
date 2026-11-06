@@ -40,13 +40,16 @@ The project combines embedded systems programming, electronics design, PCB devel
 
 ## Custom Power Distribution PCB
 
-
+Schematic Capture
 ![Schematic Capture](Images/quadbot-schematic.png)
 
+PCB layout
 ![PCB layout](Images/quadbot-pcb.png)
 
+Unsoldered PCB
 ![Unsoldered PCB](Images/PCB-unsoldered.png)
 
+Soldered PCB
 ![Soldered PCB](Images/PCB-soldered.png)
 
 

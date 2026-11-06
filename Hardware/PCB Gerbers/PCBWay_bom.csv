@@ -1,0 +1,6 @@
+﻿Designator,Quantity,Value,Footprint,Package,MPN,DNP,Mount_Type,Description,KiLib_Generator,MF,MAXIMUM_PACKAGE_HEIGHT,CREATOR,Check_prices,STANDARD,PARTREV,SnapEDA_Link,MP,Availability,Price,UNIT,MANUFACTURER
+C1,1,C_Polarized,CP_Radial_D10.0mm_P5.00mm,,,,tht,Polarized capacitor,capacitor/THT/other,,,,,,,,,,,,
+"J1, J2, J3, J4, J5, J6, J7, J8",8,Conn_01x03_Pin,PinHeader_1x03_P2.54mm_Vertical,,,,tht,"Generic connector, single row, 01x03, script generated",connector/pin_header_socket,,,,,,,,,,,,
+J10,1,Conn_01x02,PinSocket_1x02_P2.54mm_Vertical,,,,tht,"Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)",connector/pin_header_socket,,,,,,,,,,,,
+J9,1,Conn_01x04,PinSocket_1x04_P2.54mm_Vertical,,,,tht,"Generic connector, single row, 01x04, script generated (kicad-library-utils/schlib/autogen/connector/)",connector/pin_header_socket,,,,,,,,,,,,
+U1,1,XIAO_ESP32_S3,MODULE_XIAO_ESP32_S3,None,,,tht,Seeed Studio XIAO ESP32-S3 Development Board Supports Wi-Fi & Bluetooth,,Seeed Studio,4.46mm,ASHISH,https://www.snapeda.com/parts/XIAO%20ESP32%20S3/Seeed+Studio/view-part/?ref=eda,Manufacturer Recommendations,"April 22nd, 2026",https://www.snapeda.com/parts/XIAO%20ESP32%20S3/Seeed+Studio/view-part/?ref=snap,XIAO ESP32 S3,Not in stock,None,mm,Seeed Studio

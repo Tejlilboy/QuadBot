@@ -1,0 +1,13 @@
+﻿pos_x,pos_y,rotation,side,designator,mpn,pack,footprint,value,mount_type
+147.09,-101.7,0.0,top,C1,,,CP_Radial_D10.0mm_P5.00mm,C_Polarized,tht
+128.16,-94.81,0.0,top,J1,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+150.68,-110.22,-90.0,top,J10,,,PinSocket_1x02_P2.54mm_Vertical,Conn_01x02,tht
+132.75,-94.81,0.0,top,J2,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+137.34,-94.81,0.0,top,J3,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+141.93,-94.81,0.0,top,J4,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+128.15,-105.07,0.0,top,J5,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+132.74,-105.07,0.0,top,J6,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+137.33,-105.07,0.0,top,J7,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+141.92,-105.07,0.0,top,J8,,,PinHeader_1x03_P2.54mm_Vertical,Conn_01x03_Pin,tht
+124.25,-98.56,0.0,top,J9,,,PinSocket_1x04_P2.54mm_Vertical,Conn_01x04,tht
+165.9535,-101.2,-90.0,top,U1,,None,MODULE_XIAO_ESP32_S3,XIAO_ESP32_S3,tht

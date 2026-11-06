@@ -37,8 +37,19 @@ The project combines embedded systems programming, electronics design, PCB devel
 | Communication | Bluetooth |
 | Display Interface | I2C |
 | Power Distribution | Custom-designed PCB |
+| 5V Buck Converter | Step down and regulate voltage from battery |
+| Battery | 7.4 V 800 mAh 2S Li-ion |
 
-## Custom Power Distribution PCB
+---
+
+## Power Distribution Using custom PCB
+
+QuadBot uses a custom-designed power distribution PCB to organize and distribute power throughout the robot.
+
+The PCB was designed specifically for the project's electrical requirements, providing a centralized power distribution solution for the microcontroller and servo system.
+
+This was an important part of the hardware development, particularly given the current requirements of operating eight servo motors and the size constraints of the body.
+
 
 Schematic Capture
 ![Schematic Capture](Images/quadbot-schematic.png)
@@ -51,10 +62,6 @@ Unsoldered PCB
 
 Soldered PCB
 ![Soldered PCB](Images/PCB-soldered.png)
-
-
-
-
 
 
 ### Servo Configuration
@@ -87,15 +94,6 @@ The eight servos are independently controlled using the ESP32's LEDC PWM hardwar
 | SCL | D5 |
 | Address | 0x3C |
 
----
-
-## Power Distribution
-
-QuadBot uses a custom-designed power distribution PCB to organize and distribute power throughout the robot.
-
-The PCB was designed specifically for the project's electrical requirements, providing a centralized power distribution solution for the microcontroller and servo system.
-
-This was an important part of the hardware development, particularly given the current requirements of operating eight servo motors and the size constraints of the body.
 
 ---
 
@@ -125,20 +123,6 @@ QuadBot uses an Xbox wireless controller connected through Bluetooth.
 
 The robot also features automatic idle behavior. After 60 seconds without controller input, it performs a yawn animation before entering sleep mode.
 
----
-
-## Software Architecture
-
-The firmware is organized into several functional sections.
-
-| Module | Description |
-|---|---|
-| Servo Driver | Custom servo control using ESP32 LEDC PWM |
-| Motion Control | Movement sequences and servo positioning |
-| Controller Interface | Bluetooth controller input through Bluepad32 |
-| OLED Engine | Facial expressions and animations |
-| Timing System | Movement timing and speed adjustments |
-| State Management | Sitting, sleeping, and play-dead states |
 
 ### Servo Control
 
@@ -179,6 +163,21 @@ The display includes:
 - Trigger-dependent visual effects.
 
 The right analog stick also allows direct control of the character's eyes.
+
+---
+
+## Software Architecture
+
+The firmware is organized into several functional sections.
+
+| Module | Description |
+|---|---|
+| Servo Driver | Custom servo control using ESP32 LEDC PWM |
+| Motion Control | Movement sequences and servo positioning |
+| Controller Interface | Bluetooth controller input through Bluepad32 |
+| OLED Engine | Facial expressions and animations |
+| Timing System | Movement timing and speed adjustments |
+| State Management | Sitting, sleeping, and play-dead states |
 
 ---
 

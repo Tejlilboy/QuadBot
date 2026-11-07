@@ -3,7 +3,7 @@ Item,Category,Qty,Reference,Component,Specification,Notes,Supplier,Link,Unit Pri
 2,Display,1,DISP1,OLED display,"SSD1306, 128x64, I2C, address 0x3C","4-pin module (GND, VCC, SCL, SDA). Connects through the 1x4 header.",,,
 3,Actuators,8,"R1-R4, L1-L4",Micro servo motor,MG90S,4 hip servos and 4 lift servos (see servo map in README).,,,
 4,Power,1,BT1,"Li-ion battery pack, 2S","Blomiky, 7.4 V, 800 mAh",Comes with a female T-plug connector.,,,
-5,Power,1,SW1,Rocker switch,On/off power switch,Rating not specified. Choose one rated above the servo current.,,,
+5,Power,1,SW1,Rocker switch,On/off power switch,12V+.,,,
 6,Power,1,U2,Buck converter (step-down),"Output 5 V, 3 A",Steps the 7.4 V battery down to 5 V for the servos and logic.,,,
 7,Power,1,C1,Electrolytic capacitor,1000 uF,Bulk capacitor on the 5 V rail. 12 Volts,,,
 8,Power,1,PCB1,Custom power distribution PCB,Designed for QuadBot,Custom design (see the PCB images in the README).,,,

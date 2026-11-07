@@ -2,6 +2,9 @@
 
 ![QuadBot](Images/quadbot.png)
 
+
+A Quadruped based on the Open Source [**Sesame Project by Dorian Todd.**](https://github.com/dorianborian/sesame-robot)
+
 ### ESP32-based wireless quadruped robot
 
 QuadBot is a custom-built four-legged robot powered by an ESP32 and eight servo motors. It walks, turns, crab-walks and performs tricks, and an animated OLED face reacts to everything it does.
@@ -229,22 +232,6 @@ Both sketches share the same structure. Only section 3 (the controller input) di
 **Non-blocking by design.** Movement code never uses `delay()`. It waits with helpers that keep the servos gliding, the controller read and the face animating, so every movement stops the moment its input is released.
 
 **OLED face engine.** Faces are drawn with code using the Adafruit GFX library, with no image files. When the requested face changes, the lids blink shut, the face swaps and the lids reopen. With no input, a state machine plays a calm face and then a random one of 24 idle animations.
-
----
-
-## Repository layout
-
-```
-QuadBot/
-├── Images/                                      photos and PCB images
-├── robot_xbox/
-│   └── robot_xbox.ino                           Xbox controller version (Bluetooth)
-├── web_version_quadbot/
-│   └── web_version_quadbot.ino                  phone version (WiFi and web page)
-└── README.md
-```
-
-The two versions share the same servo calibration, gait and faces. If you change a pose table or add a face in one, copy the change to the other.
 
 ---
 

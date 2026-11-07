@@ -24,6 +24,9 @@ The robot firmware does not change. The app talks to the same WebSocket (`ws://1
 
 To get an APK instead: **Build → Build Bundle(s) / APK(s) → Build APK(s)**, then send the file to your phone and open it (you will need to allow installing from that source).
 
+## Interface
+![User Interface](/Images/web-page.png)
+
 ## Using it
 
 1. Power the robot.

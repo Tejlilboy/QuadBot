@@ -9,12 +9,13 @@ A Quadruped based on the Open Source [**Sesame Project by Dorian Todd.**](https:
 
 QuadBot is a custom-built four-legged robot powered by an ESP32 and eight servo motors. It walks, turns, crab-walks and performs tricks, and an animated OLED face reacts to everything it does.
 
-You can drive it two ways, from the same codebase:
+You can drive it three ways, from two firmware versions:
 
 | Version | Control | Link |
 |---|---|---|
 | **Xbox version** | Xbox wireless controller | Bluetooth (Bluepad32) |
 | **Web version** | Any phone with a browser | The robot's own WiFi network, no router or app needed |
+| **Android app** | Android phone or tablet | The robot's own WiFi network (same control page, full screen). Uses the web version firmware |
 
 The project combines embedded programming, electronics and PCB design, servo control and mechanical robotics.
 
@@ -27,8 +28,8 @@ The project combines embedded programming, electronics and PCB design, servo con
 - [Getting started](#getting-started)
 - [Controls](#controls)
 - [Web version](#web-version-phone-control-over-wifi)
+- [Android app](#android-app)
 - [How the firmware works](#how-the-firmware-works)
-- [Repository layout](#repository-layout)
 - [Roadmap and status](#roadmap-and-status)
 - [Credits](#credits)
 
@@ -37,7 +38,8 @@ The project combines embedded programming, electronics and PCB design, servo con
 ## Features
 
 - **Eight-servo locomotion:** walk forward and backward, turn on the spot, and crab walk sideways.
-- **Two ways to drive:** an Xbox controller over Bluetooth, or a phone with on-screen joysticks over WiFi.
+- **Three ways to drive:** an Xbox controller over Bluetooth, a phone browser over WiFi, or the Android app.
+- **Android app:** full-screen controller that keeps the screen on, joins the robot's WiFi with one tap, and keeps its traffic on the robot's network.
 - **Analog speed:** the further you push the stick, the faster the gait. Sprint and sneak modes change speed and stride.
 - **Smooth motion:** servos glide to their targets at a limited speed instead of snapping.
 - **Walk drift correction:** a tunable stride offset compensates for mechanical differences between the two sides.
@@ -55,7 +57,7 @@ The project combines embedded programming, electronics and PCB design, servo con
 | Microcontroller | Seeed XIAO ESP32-S3 |
 | Servos | 8x MG90S |
 | Display | SSD1306 128x64 OLED (I2C) |
-| Control | Xbox wireless controller (Bluetooth) or phone (WiFi) |
+| Control | Xbox wireless controller (Bluetooth), or phone / tablet (WiFi, browser or Android app) |
 | Power | 7.4 V 800 mAh 2S Li-ion battery |
 | Regulation | 5 V buck converter (battery to servo and logic supply) |
 | Distribution | Custom-designed power distribution PCB |
@@ -117,13 +119,15 @@ The first compile after installing a new board package can take several minutes.
 
 **Web version:** upload the sketch, then follow [the quick start below](#quick-start).
 
+**Android app:** upload the web version sketch, then install the app (see [Android app](#android-app)).
+
 ---
 
 ## Controls
 
-Both versions share the same actions.
+Both versions share the same actions. The Android app shows the same on-screen controls as the web page.
 
-| Action | Xbox controller | Web page |
+| Action | Xbox controller | Web page / Android app |
 |---|---|---|
 | Walk forward / backward | Left stick up / down | Left joystick up / down |
 | Turn left / right | Left stick left / right | Left joystick left / right |
@@ -146,7 +150,7 @@ Walking speed follows how far the stick is pushed. After 60 seconds with no inpu
 
 ## Web version: phone control over WiFi
 ![Web Page](Images/web-page.png)
-The web version replaces the Bluetooth controller with a phone. The ESP32 creates its own WiFi network and serves a control page with two on-screen joysticks and buttons. No router, internet connection or app is needed, and the page works in portrait or landscape.
+The web version replaces the Bluetooth controller with a phone. The ESP32 creates its own WiFi network and serves a control page with two on-screen joysticks and buttons. No router, internet connection or app is needed, and the page works in portrait or landscape. If you would rather have a full-screen app, see [Android app](#android-app).
 
 
 ### Quick start
@@ -205,6 +209,71 @@ phone browser  --WebSocket (81)-->   ESP32   streams joystick and button state
 - **The phone keeps leaving the network:** Android and iOS may switch back to mobile data because the network has no internet. Choose "stay connected", or turn off the automatic switch for that network.
 - **The robot stops when the phone screen turns off:** this is the deadman timer working as designed. Set a longer screen timeout while driving.
 - **SIT, SLEEP or DEAD do not respond while walking:** these toggles are only read between gait cycles. Tap them while the robot is standing.
+
+</details>
+
+---
+
+## Android app
+
+The Android app is a thin full-screen shell around the same control page as the web version. The page is bundled inside the app, so it opens instantly, and the robot firmware is exactly the same (`web_version_quadbot.ino`). The app's source code is in the `android_app/` folder.
+
+### Why use the app instead of a browser
+
+| | Browser | Android app |
+|---|---|---|
+| Full screen, locked to landscape | No | Yes |
+| Screen stays on while you drive | No (set a longer screen timeout) | Yes |
+| Traffic forced over the robot's WiFi | No (Android may switch to mobile data) | Yes |
+| Join the QuadBot network | In the phone's WiFi settings | One tap inside the app |
+| Control page | Loaded from the robot | Bundled in the app, opens instantly |
+| Works on iPhone | Yes | No (Android only) |
+
+### Install
+
+Requires Android 10 or newer.
+
+1. Download the latest APK from the [Releases page](../../releases/latest) onto your phone or tablet.
+2. Open it and allow **Install unknown apps** for the app you opened it from (Android prompts for this).
+3. If Play Protect warns that the app is unrecognized, tap **Install anyway**.
+
+### Use it
+
+1. Power the robot (running `web_version_quadbot.ino`).
+2. Open the **QuadBot** app.
+3. Tap **Not connected - tap to join QuadBot WiFi** and approve the system prompt. If you already joined the QuadBot network in WiFi settings, the page connects by itself and the button disappears.
+4. Drive with the on-screen controls, which are the same as the web page (see [Controls](#controls)).
+
+The connection made by the join button belongs to the app and ends when you close it. Your phone's normal WiFi and mobile data are left alone. If you switch to another app, the page stops sending and the robot's deadman timer makes it stand still.
+
+### Build from source
+
+1. Install [Android Studio](https://developer.android.com/studio).
+2. Choose **File → Open** and select the `android_app` folder (the one that contains `settings.gradle.kts`).
+3. Wait for the Gradle sync to finish, accepting any prompts to install the Android SDK Platform or update the Android Gradle plugin.
+4. Plug in your phone (with USB debugging on) and press **Run**. To get an APK instead, choose **Build → Build Bundle(s) / APK(s) → Build APK(s)**. The file is at `app/build/outputs/apk/debug/app-debug.apk`.
+
+The project uses no third-party libraries.
+
+### App settings
+
+The settings are in `app/src/main/java/com/quadbot/controller/MainActivity.java`.
+
+| Setting | Effect |
+|---|---|
+| `ROBOT_SSID`, `ROBOT_PASS` | Must match `AP_SSID` and `AP_PASS` in the firmware |
+| `PAGE_URL` | The bundled page by default. Set it to `"http://192.168.4.1/"` to always load the page stored on the robot |
+
+- **Allow portrait:** delete `android:screenOrientation="sensorLandscape"` in `AndroidManifest.xml`.
+- **Update the page:** if you change `PAGE` in the firmware, copy the HTML into `app/src/main/assets/index.html`.
+
+<details>
+<summary><b>Android app troubleshooting</b></summary>
+
+- **The app will not install:** allow **Install unknown apps** for the app you opened the file from, and tap **Install anyway** if Play Protect warns. On Android 16, Advanced Protection mode blocks installing apps from outside the Play Store, so turn it off or install over USB from Android Studio. If an older QuadBot app signed with a different key is installed, uninstall it first. Google's developer verification rules may also block apps from unregistered developers in some regions, in which case install over USB.
+- **The join button does nothing or says it could not join:** make sure the robot is on, then join the **QuadBot** network in the phone's WiFi settings yourself and reopen the app.
+- **Gradle sync fails:** accept the offered updates (Android Gradle plugin, SDK Platform). The project has no third-party libraries.
+- **The page stays on "Connecting...":** only one phone can drive at a time. Close any browser tab or other phone that has the page open.
 
 </details>
 

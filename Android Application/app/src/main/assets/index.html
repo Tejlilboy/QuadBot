@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0e13">
+<title>QuadBot</title>
+<style>
+:root{
+  --bg:#0a0e13; --panel:#121923; --panel2:#18222f; --line:#263548;
+  --fg:#e6edf3; --dim:#7d8b99;
+  --accent:#2fd4bf; --hold:#6aa8ff; --warn:#ff7a59; --calm:#b48cff;
+  --s:min(46vh,26vw);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;background:var(--bg);color:var(--fg);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+#app{height:100vh;height:100dvh;display:flex;flex-direction:column;gap:6px;
+  padding:max(8px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+header{display:flex;align-items:center;justify-content:space-between;font-size:13px}
+.brand{font-weight:800;letter-spacing:.18em;color:var(--accent)}
+.status{display:flex;align-items:center;gap:7px;color:var(--dim)}
+#dot{width:9px;height:9px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px rgba(255,122,89,.18)}
+#dot.ok{background:var(--accent);box-shadow:0 0 0 3px rgba(47,212,191,.2)}
+
+main{flex:1;min-height:0;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;transition:opacity .25s}
+body.off main{opacity:.4}
+
+/* ---- joysticks ---- */
+.sw{display:flex;flex-direction:column;align-items:center;gap:6px}
+.stick{position:relative;width:var(--s);height:var(--s);border-radius:50%;
+  background:radial-gradient(circle at 50% 50%,#1b2736 0,#121923 62%,#0e141c 100%);
+  border:2px solid var(--line);box-shadow:inset 0 0 22px rgba(0,0,0,.55)}
+.stick::before,.stick::after{content:"";position:absolute;background:var(--line);opacity:.7}
+.stick::before{left:50%;top:14%;bottom:14%;width:1px}
+.stick::after{top:50%;left:14%;right:14%;height:1px}
+.knob{position:absolute;left:31%;top:31%;width:38%;height:38%;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle at 35% 30%,#59f0dc,#1fa896 70%);box-shadow:0 4px 12px rgba(0,0,0,.55)}
+.sw.right .knob{background:radial-gradient(circle at 35% 30%,#9ac4ff,#4a82d6 70%)}
+.cap{font-size:11px;letter-spacing:.16em;color:var(--dim);font-weight:700}
+
+/* ---- buttons ---- */
+#buttons{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;align-content:center}
+.btn{appearance:none;-webkit-appearance:none;font:inherit;color:var(--fg);cursor:pointer;
+  height:clamp(48px,17vh,86px);padding:4px 2px;border-radius:14px;border:1px solid var(--line);background:var(--panel);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:background .08s,transform .08s}
+.btn b{font-size:clamp(11px,2.2vw,15px);letter-spacing:.06em;font-weight:800}
+.btn i{font-style:normal;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.btn.on{transform:scale(.96);color:#04110f}
+.btn.on i{color:#04110f;opacity:.7}
+.btn[data-mode="tap"].on{background:var(--accent);border-color:var(--accent)}
+.btn[data-mode="hold"].on{background:var(--hold);border-color:var(--hold)}
+.btn[data-t="sprint"].on{background:var(--warn);border-color:var(--warn)}
+.btn[data-t="sneak"].on{background:var(--calm);border-color:var(--calm)}
+
+@media (orientation:portrait){
+  :root{--s:min(42vw,26vh)}
+  main{grid-template-columns:1fr 1fr;grid-template-rows:1fr auto;align-items:end;gap:10px}
+  #buttons{grid-column:1/3;grid-row:1;align-self:center}
+  .sw.left{grid-column:1;grid-row:2}
+  .sw.right{grid-column:2;grid-row:2}
+  .btn{height:clamp(52px,9vh,84px)}
+  .btn b{font-size:clamp(11px,3.2vw,15px)}
+}
+</style>
+</head>
+<body class="off">
+<div id="app">
+  <header>
+    <div class="brand">QUADBOT</div>
+    <div class="status"><span id="dot"></span><span id="stxt">Connecting...</span></div>
+  </header>
+  <main>
+    <section class="sw left">
+      <div class="stick" id="sL"><div class="knob"></div></div>
+      <div class="cap">MOVE / TURN</div>
+    </section>
+
+    <section id="buttons">
+      <button class="btn" data-mode="tap"    data-b="A"><b>SIT</b><i>tap</i></button>
+      <button class="btn" data-mode="tap"    data-d="DOWN"><b>SLEEP</b><i>tap</i></button>
+      <button class="btn" data-mode="tap"    data-b="X"><b>DEAD</b><i>tap</i></button>
+      <button class="btn" data-mode="toggle" data-t="sprint"><b>SPRINT</b><i>toggle</i></button>
+
+      <button class="btn" data-mode="hold"   data-b="Y"><b>WAVE</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-b="B"><b>DANCE</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-d="UP"><b>PUSH-UP</b><i>hold</i></button>
+      <button class="btn" data-mode="toggle" data-t="sneak"><b>SNEAK</b><i>toggle</i></button>
+
+      <button class="btn" data-mode="hold"   data-d="LEFT"><b>SHAKE</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-d="RIGHT"><b>BOW</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-b="L1"><b>&larr; CRAB</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-b="R1"><b>CRAB &rarr;</b><i>hold</i></button>
+    </section>
+
+    <section class="sw right">
+      <div class="stick" id="sR"><div class="knob"></div></div>
+      <div class="cap">EYES</div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Where the robot is. Normally the page is served by the robot itself, so this is
+  // just the address in the browser bar. "?host=1.2.3.4" overrides it (handy for testing).
+  var params = new URLSearchParams(location.search);
+  var HOST = params.get('host') || location.hostname || '192.168.4.1';
+
+  // Everything the robot needs to know, sent as one line: s,lx,ly,rx,ry,buttons,dpad,lt,rt
+  var st = { lx: 0, ly: 0, rx: 0, ry: 0, btn: 0, dp: 0, lt: 0, rt: 0 };
+  var BIT = { A: 1, B: 2, X: 4, Y: 8, L1: 16, R1: 32 };      // button bit mask
+  var DP  = { UP: 1, DOWN: 2, RIGHT: 4, LEFT: 8 };           // d-pad bit mask
+  var MIN_TAP = 220;                                         // a "tap" is held at least this long (ms)
+
+  function $(s) { return document.querySelector(s); }
+  function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+
+  // ---------------- connection ----------------
+  var ws = null, open = false, lastStr = '', lastSent = 0;
+
+  function setStatus(on) {
+    document.body.classList.toggle('off', !on);
+    $('#dot').className = on ? 'ok' : '';
+    $('#stxt').textContent = on ? 'Connected' : 'Connecting...';
+  }
+
+  function packet() {
+    return 's,' + st.lx + ',' + st.ly + ',' + st.rx + ',' + st.ry + ',' + st.btn + ',' + st.dp + ',' + st.lt + ',' + st.rt;
+  }
+
+  function sendNow() {
+    if (!open) return;
+    var p = packet();
+    ws.send(p); lastStr = p; lastSent = performance.now();
+  }
+
+  // Send when something changed, and at least every 150 ms otherwise.
+  // The robot treats a quiet line as "let go of everything", so this heartbeat matters.
+  setInterval(function () {
+    if (!open || ws.bufferedAmount > 1024) return;
+    var p = packet(), now = performance.now();
+    if (p !== lastStr || now - lastSent > 150) { ws.send(p); lastStr = p; lastSent = now; }
+  }, 30);
+
+  function connect() {
+    try { ws = new WebSocket('ws://' + HOST + ':81/'); }
+    catch (e) { setTimeout(connect, 1000); return; }
+    ws.onopen    = function () { open = true; lastStr = ''; setStatus(true); };
+    ws.onclose   = function () { open = false; setStatus(false); setTimeout(connect, 800); };
+    ws.onerror   = function () { try { ws.close(); } catch (e) {} };
+    ws.onmessage = function (ev) {                 // "v300" = vibrate the phone for 300 ms
+      var m = ev.data;
+      if (typeof m === 'string' && m.charAt(0) === 'v') buzz(Math.min(parseInt(m.slice(1), 10) || 50, 500));
+    };
+  }
+
+  // ---------------- joysticks ----------------
+  // Output range matches an Xbox stick: -512..512, up and left are negative.
+  function makeStick(el, set) {
+    var knob = el.firstElementChild, pid = null, cx = 0, cy = 0, R = 1;
+    function move(e) {
+      var dx = e.clientX - cx, dy = e.clientY - cy, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > R) { dx *= R / d; dy *= R / d; }
+      knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      set(Math.round(dx / R * 512), Math.round(dy / R * 512));
+    }
+    function release() { pid = null; knob.style.transform = ''; set(0, 0); }
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (pid !== null) return;
+      pid = e.pointerId; el.setPointerCapture(pid);
+      var r = el.getBoundingClientRect();
+      cx = r.left + r.width / 2; cy = r.top + r.height / 2; R = r.width * 0.30;   // full push = 30% of the width
+      move(e);
+    });
+    el.addEventListener('pointermove', function (e) { if (e.pointerId === pid) move(e); });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (n) {
+      el.addEventListener(n, function (e) { if (e.pointerId === pid) release(); });
+    });
+    return function () { if (pid !== null) release(); };
+  }
+
+  var freeL = makeStick($('#sL'), function (x, y) { st.lx = x; st.ly = y; });
+  var freeR = makeStick($('#sR'), function (x, y) { st.rx = x; st.ry = y; });
+
+  // ---------------- buttons ----------------
+  // tap    = pressed for at least MIN_TAP ms (the robot reacts to the press itself)
+  // hold   = pressed only while the finger is down
+  // toggle = latches on/off (SPRINT and SNEAK; only one can be on at a time)
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('.btn'));
+
+  function toggleSpeed(name, el) {
+    var on = !el.classList.contains('on');
+    buttons.forEach(function (x) { if (x.dataset.mode === 'toggle') x.classList.remove('on'); });
+    el.classList.toggle('on', on);
+    st.rt = (name === 'sprint' && on) ? 1023 : 0;      // right trigger = sprint
+    st.lt = (name === 'sneak'  && on) ? 1023 : 0;      // left trigger  = sneak
+    sendNow();
+  }
+
+  buttons.forEach(function (el) {
+    var mode = el.dataset.mode, b = el.dataset.b, d = el.dataset.d, t = el.dataset.t;
+    var pid = null, downAt = 0, timer = 0;
+
+    function set(on) {
+      if (b) st.btn = on ? (st.btn | BIT[b]) : (st.btn & ~BIT[b]);
+      if (d) st.dp  = on ? (st.dp  | DP[d])  : (st.dp  & ~DP[d]);
+      el.classList.toggle('on', on);
+    }
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (pid !== null) return;
+      pid = e.pointerId; el.setPointerCapture(pid); buzz(12);
+      if (mode === 'toggle') { toggleSpeed(t, el); return; }
+      clearTimeout(timer); downAt = performance.now(); set(true); sendNow();
+    });
+    function up(e) {
+      if (e.pointerId !== pid) return;
+      pid = null;
+      if (mode === 'toggle') return;
+      var wait = (mode === 'tap') ? Math.max(0, MIN_TAP - (performance.now() - downAt)) : 0;
+      clearTimeout(timer);
+      if (wait > 0) timer = setTimeout(function () { set(false); }, wait); else set(false);
+    }
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (n) { el.addEventListener(n, up); });
+  });
+
+  // ---------------- safety / browser quirks ----------------
+  // If the page loses focus or goes to the background, let go of everything.
+  function releaseAll() {
+    freeL(); freeR();
+    st.btn = 0; st.dp = 0;
+    buttons.forEach(function (x) { if (x.dataset.mode !== 'toggle') x.classList.remove('on'); });
+    sendNow();
+  }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) releaseAll(); });
+  window.addEventListener('blur', releaseAll);
+  window.addEventListener('pagehide', releaseAll);
+
+  // Stop scrolling, pinch-zoom and the long-press menu from getting in the way.
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  setStatus(false);
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -1,76 +1,46 @@
 /*
  * ============================================================================
- *  Xbox-controlled quadruped walker with an animated OLED face
+ *  QuadBot (web version): phone-controlled quadruped walker with an OLED face
  * ============================================================================
  *
- *  An 8-servo, 4-legged robot driven by an ESP32, steered wirelessly with an
- *  Xbox controller (Bluetooth, via Bluepad32). A 128x64 OLED shows an animated
- *  face that reacts to everything the robot does.
+ *  Same robot, same gait, same faces and tricks as the Xbox version - but with no
+ *  Bluetooth controller. The ESP32 creates its own WiFi network and serves a control
+ *  page. Join the network with a phone, open the page, and drive with two on-screen
+ *  joysticks and buttons. No router, no internet and no app are needed.
  *
+ *  SAFETY
+ *    The page sends its state ~30 times a second. If the robot hears nothing for
+ *    0.5 s (phone locked, out of range, page closed) it treats every input as released
+ *    and stands still. Only one phone can drive at a time.
  *
- *  SERVO MAP AND CALIBRATION
- *    Each leg has a HIP servo (swings the leg back/forward) and a LIFT servo
- *    (raises/lowers the foot). Leg 1 = front, leg 2 = rear in the hip naming
- *    (R1 front-right hip, R2 rear-right hip), and 3/4 are the matching lifts.
- *
- *      Servo  Leg          Role   Pin   Channel   Home   Extended
- *      R1     Front right  hip    D0    0         0      90
- *      R2     Rear  right  hip    D2    1         90     0
- *      L1     Front left   hip    D7    2         90     0
- *      L2     Rear  left   hip    D9    3         0      90
- *      R3     Front right  lift   D1    4         180    0
- *      R4     Rear  right  lift   D3    5         0      180
- *      L3     Front left   lift   D8    6         0      180
- *      L4     Rear  left   lift   D10   7         180    0
- *
- *    "Home" for a lift = foot on the ground. The stand pose ("X stance") puts
- *    every hip at 45 (mid-stroke) with all feet down.
- *
- *  CONTROLS
- *    Left stick up / down      walk forward / backward   (further push = faster)
- *    Left stick left / right   turn on the spot (left = counter-clockwise)
- *    Right stick               move the eyes (idle and sit faces)
- *    Right trigger (RT)        sprint: shorter frames, speed lines on the face
- *    Left trigger  (LT)        sneak: slower, shorter strides, ninja mask face
- *    Left / right bumper       crab walk left / right
- *    A                         sit / stand (toggle)
- *    X                         play dead (toggle)
- *    D-pad down                sleep (toggle)
- *    Y (hold)                  wave
- *    B (hold)                  dance
- *    D-pad up (hold)           push-ups
- *    D-pad left (hold)         shake
- *    D-pad right (hold)        bow
- *    No input for 60 s         yawns, then lies down and sleeps; any input wakes it
- *
- *  LIBRARIES / BOARD
- *    Select an "ESP32 + Bluepad32" board (Bluepad32 board package), and install
- *    Adafruit GFX and Adafruit SSD1306 from the Library Manager.
+ *  SETTINGS YOU MAY WANT TO CHANGE
+ *    AP_SSID / AP_PASS   the WiFi name and password (password needs 8+ characters)
+ *    DEADMAN_MS          how long a quiet phone is tolerated before inputs are released
+ *    steer               walk drift correction (section 2)
+ *    SPEED_*             servo glide speeds (section 2)
  *
  *  HOW THE FILE IS ORGANISED (in order)
  *    1. Servo driver          MyServo class, smooth (rate-limited) servo motion
  *    2. Settings              speeds, frame times, walk drift correction
- *    3. Controller            Bluepad32 callbacks, rumble, button/stick -> action
+ *    3. Phone controller      WiFi access point, web server, WebSocket, button/stick -> action
  *    4. OLED face             drawing helpers, idle animations, the face engine
  *    5. Timing helpers        trigger speed scaling, waiting while staying responsive
  *    6. Poses and movements   pose tables and the functions that play them
  *    7. State                 toggles (sit / sleep / dead) and auto-sleep
  *    8. setup() and loop()
+ *    9. Web page              the HTML/CSS/JavaScript served to the phone (end of file)
  *
  *  POSE TABLES
  *    Every pose is 8 angles in this column order:
  *        R1  R2  L1  L2  R3  R4  L3  L4
  *    (hips first, then lifts). Movements are just lists of these rows played in
  *    sequence, so a motion can be tuned by editing numbers in its table.
- *
- *  A NOTE ON THE int CONSTANTS
- *    The action (D_*) and face (F_*) codes are plain ints rather than an enum.
- *    The Arduino IDE auto-generates function prototypes near the top of the
- *    sketch, before an enum would be declared, which breaks compilation.
  * ============================================================================
  */
 
-#include <Bluepad32.h>          // Bluetooth gamepad support (ESP32 + Bluepad32 board package)
+#include <WiFi.h>               // WiFi access point (built into the esp32 board package)
+#include <WebServer.h>          // serves the control page on port 80 (built in)
+#include <WebSocketsServer.h>   // live two-way link to the phone on port 81 (library "WebSockets")
 #include <Wire.h>               // I2C bus for the OLED
 #include <Adafruit_GFX.h>        // drawing primitives (lines, circles, text)
 #include <Adafruit_SSD1306.h>    // SSD1306 OLED driver
@@ -172,32 +142,179 @@ const int FAST_MS = 220;  // frame time at full push (don't go much lower, servo
 //   positive = shorten the RIGHT side (fixes veering left)
 //   negative = shorten the LEFT side  (fixes veering right)
 //   0        = no correction. Applies to walking forward and backward only.
-const float steer = 0.25;
+const float steer = 0.40;
 
 // ============================================================================
-//  3. CONTROLLER
+//  3. PHONE CONTROLLER (WiFi access point + web page + WebSocket)
 // ============================================================================
-// Bluepad32 callbacks, rumble, and turning the sticks/buttons into one action code.
-ControllerPtr myController = nullptr;   // the connected controller (nullptr = none)
+// The ESP32 creates its own WiFi network and serves the control page (PAGE, at the bottom
+// of this file) on port 80. The page opens a WebSocket on port 81 and streams the joystick
+// and button state about 30 times a second as one line of text:
+//
+//     s,lx,ly,rx,ry,buttons,dpad,lt,rt
+//
+//     lx ly rx ry   sticks, -512..512 (up and left are negative, like a gamepad)
+//     buttons       bit mask: A=1  B=2  X=4  Y=8  L1=16  R1=32
+//     dpad          bit mask: UP=1  DOWN=2  RIGHT=4  LEFT=8
+//     lt rt         triggers, 0..1023 (the page sends 0 or 1023: SNEAK = lt, SPRINT = rt)
+//
+// Everything below this section reads the phone through `myController`, exactly as it
+// used to read the Xbox controller. Comments elsewhere that say "Y button", "D-pad", "bumper"
+// or "trigger" use the Xbox names - the table above gives the on-screen equivalents.
+
+// ---- settings ----
+const char AP_SSID[] = "QuadBot";           // WiFi network name the phone joins
+const char AP_PASS[] = "quadbot123";        // WiFi password (must be at least 8 characters)
+const unsigned long DEADMAN_MS = 500;       // phone quiet this long => treat all inputs as released
+const unsigned long DROP_MS    = 4000;      // phone quiet this long => treat the phone as gone
+
+WebServer server(80);                       // serves the page
+WebSocketsServer webSocket(81);             // receives the stick / button state
+extern const char PAGE[];                   // the web page (defined at the end of the file)
+
+int clientNum = -1;                         // WebSocket slot of the phone that is driving (-1 = none)
+unsigned long lastMsgAt = 0;                // when the last packet arrived (millis)
 int connMode = 0;                 // 0 searching, 1 just connected, 2 just lost (drives the connection faces)
 unsigned long connAt = 0;         // when connMode last changed (millis)
 
-// Bluepad32 calls this when a controller connects.
-void onConnectedController(ControllerPtr ctl) {
-  myController = ctl;
-  Serial.println("Controller connected!");
-  connMode = 1; connAt = millis();
-  ctl->playDualRumble(0, 300, 0x80, 0x40);   // welcome buzz
+// A virtual gamepad filled in from the phone's packets. Method names match Bluepad32.
+class WebPad {
+public:
+  int ax = 0, ay = 0, arx = 0, ary = 0;     // left stick x/y and right stick x/y
+  int btn = 0;                              // button bits (see above)
+  int dp = 0;                               // d-pad bits
+  int lt = 0, rt = 0;                       // triggers
+  bool linked = false;                      // true while a phone is connected
+
+  int  axisX()  { return ax; }
+  int  axisY()  { return ay; }
+  int  axisRX() { return arx; }
+  int  axisRY() { return ary; }
+  bool a()  { return btn & 1; }
+  bool b()  { return btn & 2; }
+  bool x()  { return btn & 4; }
+  bool y()  { return btn & 8; }
+  bool l1() { return btn & 16; }
+  bool r1() { return btn & 32; }
+  int  buttons()  { return btn; }
+  int  dpad()     { return dp; }
+  int  throttle() { return rt; }            // right trigger = SPRINT
+  int  brake()    { return lt; }            // left trigger  = SNEAK
+  bool isConnected() { return linked; }
+
+  // Treat everything as released (sticks centred, no buttons). Keeps the connection.
+  void clear() { ax = ay = arx = ary = btn = dp = lt = rt = 0; }
+
+  // "Rumble" = vibrate the phone (works on Android; iPhones ignore it). weak/strong are unused.
+  void playDualRumble(int delayMs, int ms, int weak, int strong) {
+    if (!linked || clientNum < 0) return;
+    char msg[16];
+    snprintf(msg, sizeof(msg), "v%d", ms);
+    webSocket.sendTXT((uint8_t)clientNum, msg);
+  }
+};
+
+WebPad pad;                                 // the one phone
+WebPad* myController = nullptr;             // &pad while a phone is connected, else nullptr
+
+// Called by the WebSocket server for every connection event and message.
+void onWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      // Someone else is actively driving: refuse the newcomer.
+      if (clientNum >= 0 && clientNum != num && pad.linked && millis() - lastMsgAt < 3000) {
+        webSocket.disconnect(num);
+        return;
+      }
+      // An older connection that went quiet: replace it.
+      if (clientNum >= 0 && clientNum != num) webSocket.disconnect((uint8_t)clientNum);
+      clientNum = num;
+      pad.clear();
+      pad.linked = true;
+      myController = &pad;
+      lastMsgAt = millis();
+      connMode = 1; connAt = millis();
+      Serial.println("Phone connected!");
+      pad.playDualRumble(0, 300, 0x80, 0x40);   // welcome buzz
+      break;
+
+    case WStype_DISCONNECTED:
+      if ((int)num == clientNum) {
+        clientNum = -1;
+        pad.clear();
+        pad.linked = false;
+        myController = nullptr;
+        connMode = 2; connAt = millis();
+        Serial.println("Phone disconnected!");
+      }
+      break;
+
+    case WStype_TEXT:
+      if ((int)num != clientNum) break;
+      {
+        char buf[64];
+        size_t n = length < sizeof(buf) - 1 ? length : sizeof(buf) - 1;
+        memcpy(buf, payload, n);
+        buf[n] = 0;
+        int v[8];
+        if (sscanf(buf, "s,%d,%d,%d,%d,%d,%d,%d,%d",
+                   &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) == 8) {
+          pad.ax  = constrain(v[0], -512, 512);
+          pad.ay  = constrain(v[1], -512, 512);
+          pad.arx = constrain(v[2], -512, 512);
+          pad.ary = constrain(v[3], -512, 512);
+          pad.btn = v[4];
+          pad.dp  = v[5];
+          pad.lt  = constrain(v[6], 0, 1023);
+          pad.rt  = constrain(v[7], 0, 1023);
+          lastMsgAt = millis();
+        }
+      }
+      break;
+
+    default:
+      break;
+  }
 }
 
-// Bluepad32 calls this when the controller disconnects.
-void onDisconnectedController(ControllerPtr ctl) {
-  if (myController == ctl) myController = nullptr;
-  Serial.println("Controller disconnected!");
-  connMode = 2; connAt = millis();
+// Serves the control page.
+void handleRoot() {
+  server.sendHeader("Cache-Control", "no-cache");
+  server.send_P(200, "text/html", PAGE);
 }
 
-// Short controller rumble. weak / strong are the two motor strengths (0-255).
+// Starts the WiFi network, the web server and the WebSocket server. Call once from setup().
+void netSetup() {
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  WiFi.setSleep(false);                     // no WiFi power saving: lower, steadier latency
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.onNotFound([]() { server.send(404, "text/plain", "Not found"); });
+  server.begin();
+
+  webSocket.begin();
+  webSocket.onEvent(onWsEvent);
+  webSocket.enableHeartbeat(15000, 3000, 2);   // drop dead connections (ping every 15 s)
+
+  Serial.print("WiFi network: ");  Serial.println(AP_SSID);
+  Serial.print("Open this on the phone: http://");  Serial.println(WiFi.softAPIP());
+}
+
+// Services the network and applies the safety timeouts. Called all the time - from loop()
+// and from every wait - so the phone stays responsive in the middle of a step.
+void netUpdate() {
+  server.handleClient();
+  webSocket.loop();
+
+  if (pad.linked) {
+    unsigned long quiet = millis() - lastMsgAt;
+    if (quiet > DROP_MS) webSocket.disconnect((uint8_t)clientNum);   // handler resets the state
+    else if (quiet > DEADMAN_MS) pad.clear();                         // deadman: let go of everything
+  }
+}
+
+// Short phone vibration. weak / strong are accepted for compatibility and ignored.
 void buzz(int ms, int weak, int strong) {
   if (myController && myController->isConnected()) myController->playDualRumble(0, ms, weak, strong);
 }
@@ -216,8 +333,8 @@ const int D_NONE   = 0,    // no input: hold the stand pose
           D_SHAKE  = 10,   // D-pad left held
           D_BOW    = 11;   // D-pad right held
 
-// Reads the controller and returns ONE action code. Held buttons win over the stick.
-// Returns D_NONE if no controller is connected or nothing is pressed.
+// Reads the phone and returns ONE action code. Held buttons win over the stick.
+// Returns D_NONE if no phone is connected or nothing is pressed.
 // Stick range is about -512..512; thresholds below are the dead zones.
 int readDirection() {
   if (!myController || !myController->isConnected()) return D_NONE;
@@ -289,7 +406,7 @@ const int F_IDLE   = 0,    // random idle animations (see drawIdle)
           F_SEARCH = 15,   // no controller: eyes scan, dots count up
           F_HELLO  = 16,   // controller just connected: happy greeting
           F_SAD    = 17;   // controller just lost: droopy eyes, frown, tear
-bool sprinting = false, sneaking = false;   // right / left trigger held past ~30% (draws overlays on movement faces)
+bool sprinting = false, sneaking = false;   // SPRINT / SNEAK on (rt / lt past ~30%); draws overlays on movement faces
 int face = F_IDLE;                           // the face we WANT to show; updateFace() blinks over to it
 
 // Right stick eye control: eyeActive while the stick is pushed; eyeTX/eyeTY are the
@@ -952,7 +1069,7 @@ void updateFace() {
     }
   }
   // ---- overlays ----
-  // sprint (right trigger): speed lines and a sweat drop on movement faces
+  // sprint (SPRINT toggle): speed lines and a sweat drop on movement faces
   bool moving = (shown == F_FWD || shown == F_BACK || shown == F_LEFT || shown == F_RIGHT || shown == F_CRABL || shown == F_CRABR);
   if (moving && sprinting) {                        // speed lines and a sweat drop
     for (int i = 0; i < 3; i++) display.drawLine(0, 18 + i * 12, 10 + ((t / 60) % 3) * 4, 18 + i * 12, SSD1306_WHITE);
@@ -988,10 +1105,10 @@ void updateFace() {
 // ============================================================================
 //  5. TIMING HELPERS
 // ============================================================================
-// Frame-time scaling from the triggers, and waiting functions that keep the robot
-// responsive (servos gliding, controller read, face animating) while they wait.
-// Scales a frame time with the triggers: RT = faster (up to 35% shorter),
-// LT = slower (up to 60% longer). Result is kept between 170 and 900 ms.
+// Frame-time scaling from the sprint / sneak toggles, and waiting functions that keep the
+// robot responsive (servos gliding, phone read, face animating) while they wait.
+// Scales a frame time with the sprint / sneak toggles: SPRINT (rt) = faster (35% shorter),
+// SNEAK (lt) = slower (60% longer). Result is kept between 170 and 900 ms.
 int scaleMs(int ms) {
   if (!myController) return ms;
   float rt = myController->throttle() / 1023.0;
@@ -1011,12 +1128,12 @@ int stickFrameMs(int d) {
   return scaleMs(map(mag, thr, 512, SLOW_MS, FAST_MS));
 }
 
-// Waits `ms` milliseconds without freezing: servos keep gliding, the controller is read
+// Waits `ms` milliseconds without freezing: servos keep gliding, the phone link is serviced
 // and the face keeps animating. Use this instead of delay() for any pause.
 void waitMs(int ms) {
   unsigned long start = millis();
   while (millis() - start < (unsigned long)ms) {
-    BP32.update();
+    netUpdate();
     servosUpdate();
     updateFace();
     delay(5);
@@ -1029,7 +1146,7 @@ void waitMs(int ms) {
 bool pressingCheck(int d, int ms) {
   unsigned long start = millis();
   while (millis() - start < (unsigned long)ms) {
-    BP32.update();
+    netUpdate();
     servosUpdate();
     updateFace();
     if (readDirection() != d) return false;
@@ -1297,12 +1414,12 @@ const unsigned long AUTO_SLEEP_MS = 60000;   // idle time before lying down
 unsigned long lastInput = 0;                 // when input was last seen (millis)
 bool autoSlept = false;                      // true if the current sleep was automatic (any input wakes it)
 bool yawnQueued = false;                     // the pre-sleep yawn has been triggered
-bool sprintPrev = false;                     // sprint trigger state last pass (for the one-time buzz)
+bool sprintPrev = false;                     // SPRINT state last pass (for the one-time buzz)
 
 // ============================================================================
 //  8. SETUP AND LOOP
 // ============================================================================
-// One-time startup: serial, servos, OLED, stand pose, then Bluetooth.
+// One-time startup: serial, servos, OLED, stand pose, then the WiFi network and web server.
 void setup() {
   Serial.begin(115200);
 
@@ -1326,8 +1443,8 @@ void setup() {
   standPose();              // start standing
   lastInput = millis();     // start the auto-sleep timer
 
-  BP32.setup(&onConnectedController, &onDisconnectedController);
-  Serial.println("Waiting for controller...");
+  netSetup();               // WiFi network + web page + WebSocket
+  Serial.println("Waiting for a phone...");
 }
 
 int lastDir = D_NONE;   // the action code from the previous pass (to detect a change)
@@ -1339,9 +1456,9 @@ int lastDir = D_NONE;   // the action code from the previous pass (to detect a c
 //   4. sprint rumble             9. auto-sleep check
 //   5. wake from auto-sleep     10. read the action, pick a face, run the movement
 // The movement functions block while they play, but stay responsive through
-// pressingCheck() / waitMs(), which keep servos, controller and face updating.
+// pressingCheck() / waitMs(), which keep servos, phone link and face updating.
 void loop() {
-  BP32.update();
+  netUpdate();
 
   // 1. Servos: choose the glide speed for the current state, then advance them
   servoSpeed = sleeping ? SPEED_SLEEP : dead ? SPEED_DEAD : sitting ? SPEED_SIT : SPEED_GAIT;
@@ -1357,12 +1474,12 @@ void loop() {
   eyeTY = eyeActive ? constrain(ry, -512, 512) / 512.0 * 14.0 : 0;
 
   // 3. Activity: any input at all resets the auto-sleep timer
+  // (SPRINT / SNEAK are latched toggles, so they are not counted as activity)
   bool anyInput = conn && (myController->buttons() || myController->dpad()
-                  || myController->throttle() > 40 || myController->brake() > 40
                   || abs(myController->axisX()) > 100 || abs(myController->axisY()) > 120 || eyeActive);
   if (anyInput) { lastInput = millis(); yawnQueued = false; forceIdleAnim = 0; }
 
-  // 4. Rumble once when the sprint trigger is first pressed
+  // 4. Vibrate the phone once when SPRINT is first switched on
   if (sprinting && !sprintPrev) buzz(80, 0x40, 0x20);
   sprintPrev = sprinting;
 
@@ -1376,7 +1493,7 @@ void loop() {
     waitMs(frameDelay);
   }
 
-  // 6. Trigger flags for the face overlays (RT = sprint, LT = sneak)
+  // 6. Sprint / sneak flags for the face overlays (SPRINT = rt, SNEAK = lt)
   if (myController && myController->isConnected()) {
     sprinting = myController->throttle() > 300;
     sneaking  = myController->brake() > 300;
@@ -1527,3 +1644,266 @@ void loop() {
   updateFace();
   delay(1);
 }
+
+// ============================================================================
+//  9. WEB PAGE
+// ============================================================================
+// The control page served to the phone: HTML + CSS + JavaScript in one string stored in
+// flash. It draws the two joysticks and the buttons, keeps a WebSocket open to the robot
+// (so the page never reloads), and sends the state described in section 3.
+// To restyle the page, edit the HTML / CSS / JavaScript text below.
+const char PAGE[] = R"rawliteral(<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0e13">
+<title>QuadBot</title>
+<style>
+:root{
+  --bg:#0a0e13; --panel:#121923; --panel2:#18222f; --line:#263548;
+  --fg:#e6edf3; --dim:#7d8b99;
+  --accent:#2fd4bf; --hold:#6aa8ff; --warn:#ff7a59; --calm:#b48cff;
+  --s:min(46vh,26vw);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;background:var(--bg);color:var(--fg);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+#app{height:100vh;height:100dvh;display:flex;flex-direction:column;gap:6px;
+  padding:max(8px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+header{display:flex;align-items:center;justify-content:space-between;font-size:13px}
+.brand{font-weight:800;letter-spacing:.18em;color:var(--accent)}
+.status{display:flex;align-items:center;gap:7px;color:var(--dim)}
+#dot{width:9px;height:9px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px rgba(255,122,89,.18)}
+#dot.ok{background:var(--accent);box-shadow:0 0 0 3px rgba(47,212,191,.2)}
+
+main{flex:1;min-height:0;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;transition:opacity .25s}
+body.off main{opacity:.4}
+
+/* ---- joysticks ---- */
+.sw{display:flex;flex-direction:column;align-items:center;gap:6px}
+.stick{position:relative;width:var(--s);height:var(--s);border-radius:50%;
+  background:radial-gradient(circle at 50% 50%,#1b2736 0,#121923 62%,#0e141c 100%);
+  border:2px solid var(--line);box-shadow:inset 0 0 22px rgba(0,0,0,.55)}
+.stick::before,.stick::after{content:"";position:absolute;background:var(--line);opacity:.7}
+.stick::before{left:50%;top:14%;bottom:14%;width:1px}
+.stick::after{top:50%;left:14%;right:14%;height:1px}
+.knob{position:absolute;left:31%;top:31%;width:38%;height:38%;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle at 35% 30%,#59f0dc,#1fa896 70%);box-shadow:0 4px 12px rgba(0,0,0,.55)}
+.sw.right .knob{background:radial-gradient(circle at 35% 30%,#9ac4ff,#4a82d6 70%)}
+.cap{font-size:11px;letter-spacing:.16em;color:var(--dim);font-weight:700}
+
+/* ---- buttons ---- */
+#buttons{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;align-content:center}
+.btn{appearance:none;-webkit-appearance:none;font:inherit;color:var(--fg);cursor:pointer;
+  height:clamp(48px,17vh,86px);padding:4px 2px;border-radius:14px;border:1px solid var(--line);background:var(--panel);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:background .08s,transform .08s}
+.btn b{font-size:clamp(11px,2.2vw,15px);letter-spacing:.06em;font-weight:800}
+.btn i{font-style:normal;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.btn.on{transform:scale(.96);color:#04110f}
+.btn.on i{color:#04110f;opacity:.7}
+.btn[data-mode="tap"].on{background:var(--accent);border-color:var(--accent)}
+.btn[data-mode="hold"].on{background:var(--hold);border-color:var(--hold)}
+.btn[data-t="sprint"].on{background:var(--warn);border-color:var(--warn)}
+.btn[data-t="sneak"].on{background:var(--calm);border-color:var(--calm)}
+
+@media (orientation:portrait){
+  :root{--s:min(42vw,26vh)}
+  main{grid-template-columns:1fr 1fr;grid-template-rows:1fr auto;align-items:end;gap:10px}
+  #buttons{grid-column:1/3;grid-row:1;align-self:center}
+  .sw.left{grid-column:1;grid-row:2}
+  .sw.right{grid-column:2;grid-row:2}
+  .btn{height:clamp(52px,9vh,84px)}
+  .btn b{font-size:clamp(11px,3.2vw,15px)}
+}
+</style>
+</head>
+<body class="off">
+<div id="app">
+  <header>
+    <div class="brand">QUADBOT</div>
+    <div class="status"><span id="dot"></span><span id="stxt">Connecting...</span></div>
+  </header>
+  <main>
+    <section class="sw left">
+      <div class="stick" id="sL"><div class="knob"></div></div>
+      <div class="cap">MOVE / TURN</div>
+    </section>
+
+    <section id="buttons">
+      <button class="btn" data-mode="tap"    data-b="A"><b>SIT</b><i>tap</i></button>
+      <button class="btn" data-mode="tap"    data-d="DOWN"><b>SLEEP</b><i>tap</i></button>
+      <button class="btn" data-mode="tap"    data-b="X"><b>DEAD</b><i>tap</i></button>
+      <button class="btn" data-mode="toggle" data-t="sprint"><b>SPRINT</b><i>toggle</i></button>
+
+      <button class="btn" data-mode="hold"   data-b="Y"><b>WAVE</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-b="B"><b>DANCE</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-d="UP"><b>PUSH-UP</b><i>hold</i></button>
+      <button class="btn" data-mode="toggle" data-t="sneak"><b>SNEAK</b><i>toggle</i></button>
+
+      <button class="btn" data-mode="hold"   data-d="LEFT"><b>SHAKE</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-d="RIGHT"><b>BOW</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-b="L1"><b>&larr; CRAB</b><i>hold</i></button>
+      <button class="btn" data-mode="hold"   data-b="R1"><b>CRAB &rarr;</b><i>hold</i></button>
+    </section>
+
+    <section class="sw right">
+      <div class="stick" id="sR"><div class="knob"></div></div>
+      <div class="cap">EYES</div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Where the robot is. Normally the page is served by the robot itself, so this is
+  // just the address in the browser bar. "?host=1.2.3.4" overrides it (handy for testing).
+  var params = new URLSearchParams(location.search);
+  var HOST = params.get('host') || location.hostname || '192.168.4.1';
+
+  // Everything the robot needs to know, sent as one line: s,lx,ly,rx,ry,buttons,dpad,lt,rt
+  var st = { lx: 0, ly: 0, rx: 0, ry: 0, btn: 0, dp: 0, lt: 0, rt: 0 };
+  var BIT = { A: 1, B: 2, X: 4, Y: 8, L1: 16, R1: 32 };      // button bit mask
+  var DP  = { UP: 1, DOWN: 2, RIGHT: 4, LEFT: 8 };           // d-pad bit mask
+  var MIN_TAP = 220;                                         // a "tap" is held at least this long (ms)
+
+  function $(s) { return document.querySelector(s); }
+  function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+
+  // ---------------- connection ----------------
+  var ws = null, open = false, lastStr = '', lastSent = 0;
+
+  function setStatus(on) {
+    document.body.classList.toggle('off', !on);
+    $('#dot').className = on ? 'ok' : '';
+    $('#stxt').textContent = on ? 'Connected' : 'Connecting...';
+  }
+
+  function packet() {
+    return 's,' + st.lx + ',' + st.ly + ',' + st.rx + ',' + st.ry + ',' + st.btn + ',' + st.dp + ',' + st.lt + ',' + st.rt;
+  }
+
+  function sendNow() {
+    if (!open) return;
+    var p = packet();
+    ws.send(p); lastStr = p; lastSent = performance.now();
+  }
+
+  // Send when something changed, and at least every 150 ms otherwise.
+  // The robot treats a quiet line as "let go of everything", so this heartbeat matters.
+  setInterval(function () {
+    if (!open || ws.bufferedAmount > 1024) return;
+    var p = packet(), now = performance.now();
+    if (p !== lastStr || now - lastSent > 150) { ws.send(p); lastStr = p; lastSent = now; }
+  }, 30);
+
+  function connect() {
+    try { ws = new WebSocket('ws://' + HOST + ':81/'); }
+    catch (e) { setTimeout(connect, 1000); return; }
+    ws.onopen    = function () { open = true; lastStr = ''; setStatus(true); };
+    ws.onclose   = function () { open = false; setStatus(false); setTimeout(connect, 800); };
+    ws.onerror   = function () { try { ws.close(); } catch (e) {} };
+    ws.onmessage = function (ev) {                 // "v300" = vibrate the phone for 300 ms
+      var m = ev.data;
+      if (typeof m === 'string' && m.charAt(0) === 'v') buzz(Math.min(parseInt(m.slice(1), 10) || 50, 500));
+    };
+  }
+
+  // ---------------- joysticks ----------------
+  // Output range matches an Xbox stick: -512..512, up and left are negative.
+  function makeStick(el, set) {
+    var knob = el.firstElementChild, pid = null, cx = 0, cy = 0, R = 1;
+    function move(e) {
+      var dx = e.clientX - cx, dy = e.clientY - cy, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > R) { dx *= R / d; dy *= R / d; }
+      knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      set(Math.round(dx / R * 512), Math.round(dy / R * 512));
+    }
+    function release() { pid = null; knob.style.transform = ''; set(0, 0); }
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (pid !== null) return;
+      pid = e.pointerId; el.setPointerCapture(pid);
+      var r = el.getBoundingClientRect();
+      cx = r.left + r.width / 2; cy = r.top + r.height / 2; R = r.width * 0.30;   // full push = 30% of the width
+      move(e);
+    });
+    el.addEventListener('pointermove', function (e) { if (e.pointerId === pid) move(e); });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (n) {
+      el.addEventListener(n, function (e) { if (e.pointerId === pid) release(); });
+    });
+    return function () { if (pid !== null) release(); };
+  }
+
+  var freeL = makeStick($('#sL'), function (x, y) { st.lx = x; st.ly = y; });
+  var freeR = makeStick($('#sR'), function (x, y) { st.rx = x; st.ry = y; });
+
+  // ---------------- buttons ----------------
+  // tap    = pressed for at least MIN_TAP ms (the robot reacts to the press itself)
+  // hold   = pressed only while the finger is down
+  // toggle = latches on/off (SPRINT and SNEAK; only one can be on at a time)
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('.btn'));
+
+  function toggleSpeed(name, el) {
+    var on = !el.classList.contains('on');
+    buttons.forEach(function (x) { if (x.dataset.mode === 'toggle') x.classList.remove('on'); });
+    el.classList.toggle('on', on);
+    st.rt = (name === 'sprint' && on) ? 1023 : 0;      // right trigger = sprint
+    st.lt = (name === 'sneak'  && on) ? 1023 : 0;      // left trigger  = sneak
+    sendNow();
+  }
+
+  buttons.forEach(function (el) {
+    var mode = el.dataset.mode, b = el.dataset.b, d = el.dataset.d, t = el.dataset.t;
+    var pid = null, downAt = 0, timer = 0;
+
+    function set(on) {
+      if (b) st.btn = on ? (st.btn | BIT[b]) : (st.btn & ~BIT[b]);
+      if (d) st.dp  = on ? (st.dp  | DP[d])  : (st.dp  & ~DP[d]);
+      el.classList.toggle('on', on);
+    }
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (pid !== null) return;
+      pid = e.pointerId; el.setPointerCapture(pid); buzz(12);
+      if (mode === 'toggle') { toggleSpeed(t, el); return; }
+      clearTimeout(timer); downAt = performance.now(); set(true); sendNow();
+    });
+    function up(e) {
+      if (e.pointerId !== pid) return;
+      pid = null;
+      if (mode === 'toggle') return;
+      var wait = (mode === 'tap') ? Math.max(0, MIN_TAP - (performance.now() - downAt)) : 0;
+      clearTimeout(timer);
+      if (wait > 0) timer = setTimeout(function () { set(false); }, wait); else set(false);
+    }
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(function (n) { el.addEventListener(n, up); });
+  });
+
+  // ---------------- safety / browser quirks ----------------
+  // If the page loses focus or goes to the background, let go of everything.
+  function releaseAll() {
+    freeL(); freeR();
+    st.btn = 0; st.dp = 0;
+    buttons.forEach(function (x) { if (x.dataset.mode !== 'toggle') x.classList.remove('on'); });
+    sendNow();
+  }
+  document.addEventListener('visibilitychange', function () { if (document.hidden) releaseAll(); });
+  window.addEventListener('blur', releaseAll);
+  window.addEventListener('pagehide', releaseAll);
+
+  // Stop scrolling, pinch-zoom and the long-press menu from getting in the way.
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  setStatus(false);
+  connect();
+})();
+</script>
+</body>
+</html>)rawliteral";
